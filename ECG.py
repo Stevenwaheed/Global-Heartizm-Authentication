@@ -1177,6 +1177,26 @@ def authentication_train():
                     +f'\n- Precision Score: {precision_score(ExtraTree_preds, y_test.values, average="weighted")}'})
 
 
+@app.route('/authentication/fitbit_data', methods=['POST'])
+def authentication_data():
+    
+    json_data = json.loads(request.data.decode('utf-8'))
+    data = json_data['ecg']
+    
+    connection = sqlite3.Connection('Heartizm.db')
+    cursor = connection.cursor()
+    cursor.executemany('INSERT INTO Fitbit_ECG VALUES (?)', data)
+    
+    connection.commit()
+    connection.close()
+    
+    df = pd.DataFrame([data])
+    df.to_csv('fitbit data.csv')
+    
+    return ' '
+
+
+
 # '''
 #     this API function task is to take the ECG record from the user, extract the main 30 features,
 #     then send them to the ML model for prediction.
