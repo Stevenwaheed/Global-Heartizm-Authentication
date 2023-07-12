@@ -3,6 +3,7 @@ from flask import Flask, jsonify, request, make_response
 from flask_restful import Api
 
 # DataFrame packages
+import matplotlib.pyplot
 import numpy as np
 import pandas as pd
 
@@ -16,6 +17,9 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import f1_score, recall_score, precision_score
 from sklearn.model_selection import train_test_split
 
+
+# from imblearn.over_sampling import RandomOverSampler
+
 # Database packages
 import sqlite3
 # import _sqlite3
@@ -24,8 +28,8 @@ import sqlite3
 import joblib
 import json
 import secrets
-
-
+import matplotlib.pyplot as plt
+ 
 
 '''
     This class contains all necessary functions that needed to deal with ECG signals such as:
@@ -46,7 +50,8 @@ import secrets
 class ECG:
     
     def __init__(self, original_signal):
-        self.original_signal = original_signal    #    It is a DateFrame.
+        self.original_signal = original_signal   
+        #    It is a DateFrame.
         
     
     '''
@@ -87,8 +92,8 @@ class ECG:
         , RT Amplitude, PS Amplitude, PT Amplitude, TQ Amplitude
         ,QR Amplitude, RS Amplitude}.
     '''
-    def Amplitudes(self, peak1, peak2):
-        amplitudes = np.abs(peak1 - peak2)
+    def Amplitudes(self, signal, peak1, peak2):
+        amplitudes = np.abs(signal.iloc[peak1, 0].values.flatten() - signal.iloc[peak2, 0].values.flatten())
         return amplitudes
 
 
@@ -104,16 +109,16 @@ class ECG:
     '''
         This function takes two ECG peaks, and return the {distances and slopes} between peaks.
     '''
-    def get_ECG_features(self, peaks1, peaks2):
+    def get_ECG_features(self, signal, peaks1, peaks2):
         # signal = self.edit_dataframe()
-        self.original_signal.dropna(inplace=True)
+        # self.original_signal.dropna(inplace=True)
         
         X1 = peaks2
         # print(peaks2.values.flatten())
-        Y1 = self.original_signal.iloc[peaks2.values.flatten(), 0]
+        Y1 = signal.iloc[peaks2.values.flatten(), 0]
 
         X2 = peaks1
-        Y2 = self.original_signal.iloc[peaks1.values.flatten(), 0]
+        Y2 = signal.iloc[peaks1.values.flatten(), 0]
         
         # Calculate Distances
         distances = self.Distances(X1, Y1, X2, Y2)
@@ -122,6 +127,7 @@ class ECG:
         slopes = self.Slope(X1, Y1, X2, Y2)
 
         return distances, slopes
+
 
     '''
         thsi function take the csv file (original_signal){It is a DateFrame} and returns {heart rate}.
@@ -164,31 +170,14 @@ class ECG:
         and return the {correct two ECG peaks}.
     '''
     def remove_nulls(self, peaks, rpeaks):
+        total_df = pd.DataFrame(columns=['ECG_R_Peaks'])
         
-        if len(peaks) > len(rpeaks):
-            TF_selection = pd.DataFrame(peaks[:len(rpeaks)]).notna().values.flatten()
-            new_peaks = pd.DataFrame(peaks[:len(rpeaks)]).dropna()
-            new_rpeaks = pd.DataFrame(rpeaks[TF_selection])
-            
-            return new_peaks.astype('int'), new_rpeaks.astype('int')
+        total_df['ECG_R_Peaks'] = rpeaks
+        total_df['ECG_Peaks'] = peaks
         
-        elif len(peaks) < len(rpeaks):
-            TF_selection = pd.DataFrame(peaks).notna().values.flatten()
-            new_peaks = pd.DataFrame(peaks).dropna()
-            rpeaks = rpeaks[:len(TF_selection)]
-            new_rpeaks = pd.DataFrame(rpeaks[TF_selection])
-            
-            return new_peaks.astype('int'), new_rpeaks.astype('int')
+        total_df.dropna(inplace=True)
         
-        else:
-            total_df = pd.DataFrame(columns=['ECG_R_Peaks'])
-            
-            total_df['ECG_R_Peaks'] = rpeaks
-            total_df['ECG_Peaks'] = peaks
-            
-            total_df.dropna(inplace=True)
-            
-            return total_df['ECG_Peaks'].astype('int'), total_df['ECG_R_Peaks'].astype('int')
+        return total_df['ECG_Peaks'].astype('int'), total_df['ECG_R_Peaks'].astype('int')
         
 
     '''
@@ -200,25 +189,29 @@ class ECG:
         and returns the {filtered signal}, the {r peaks} and the {other peaks}.
     '''
     def peak_detection(self):
-        global ecg_freq
+        # global ecg_freq
         # sample_rate = self.get_sample_rate()
         # signal = self.edit_dataframe()
-        signals, _ = nk.ecg_process(self.original_signal.values.flatten(), sampling_rate=ecg_freq)
-        signals, _ = nk.ecg_process(signals['ECG_Clean'][2000:], sampling_rate=ecg_freq)
         
-        filtered_data = heartpy.filtering.filter_signal(signals.iloc[:, 1], filtertype='bandpass', cutoff=[2.5, 40], sample_rate=ecg_freq, order=3)
-        corrected_data = heartpy.hampel_correcter(filtered_data, sample_rate=500)
+        signals, _ = nk.ecg_process(self.original_signal.values.flatten(), sampling_rate=250)
+        signals, _ = nk.ecg_process(signals['ECG_Clean'], sampling_rate=250)
+        
+        filtered_data = heartpy.filtering.filter_signal(signals.iloc[:, 1], filtertype='bandpass', cutoff=[2.5, 40], sample_rate=250, order=3)
+        corrected_data = heartpy.hampel_correcter(filtered_data, sample_rate=250)
         final_signal = np.array(filtered_data)+np.array(corrected_data)
         
-        filtered_data2= heartpy.filtering.filter_signal(final_signal, filtertype='bandpass', cutoff=[3, 20], sample_rate=ecg_freq, order=3)
-        corrected_data2 = heartpy.filtering.hampel_correcter(filtered_data2, sample_rate=ecg_freq)
+        filtered_data2= heartpy.filtering.filter_signal(final_signal, filtertype='bandpass', cutoff=[3, 20], sample_rate=250, order=3)
+        corrected_data2 = heartpy.filtering.hampel_correcter(filtered_data2, sample_rate=250)
         final_signal2 = np.array(filtered_data2) + np.array(corrected_data2)
         
-        rr_peaks = nk.ecg_findpeaks(final_signal2, sampling_rate=ecg_freq)
+        rr_peaks = nk.ecg_findpeaks(final_signal2, sampling_rate=250)
         
-        _, features = nk.ecg_delineate(final_signal2, sampling_rate=ecg_freq, method='peak')
+        _, features = nk.ecg_delineate(final_signal2, sampling_rate=250, method='peak')
         
-        return signals, rr_peaks, features
+        signal = pd.DataFrame(columns=['signal'])
+        signal['signal'] = final_signal2
+        
+        return signal, rr_peaks, features
         
 
     '''
@@ -239,7 +232,7 @@ class ECG:
         'QR Amplitude', 'RS Amplitude'
         ])
         
-        _, rr_peaks, features = self.peak_detection()
+        signal, rr_peaks, features = self.peak_detection()
         
         
         p_peaks, pr_peaks = self.remove_nulls(features['ECG_P_Peaks'], rr_peaks['ECG_R_Peaks'])
@@ -249,36 +242,46 @@ class ECG:
  
         
         # Features between PR
-        PR_distances = self.get_ECG_features(pr_peaks, p_peaks)[0]
-        PR_slopes = self.get_ECG_features(pr_peaks, p_peaks)[1]
-        PR_amplitudes = self.Amplitudes(pr_peaks.values.flatten(), p_peaks.values.flatten())
+        PR_distances = self.get_ECG_features(signal, pr_peaks, p_peaks)[0]
+        PR_slopes = self.get_ECG_features(signal, pr_peaks, p_peaks)[1]
+        PR_amplitudes = self.Amplitudes(signal, pr_peaks.values.flatten(), p_peaks.values.flatten())
 
         # Features between PQ
-        PQ_distances = self.get_ECG_features(p_peaks, q_peaks)[0]
-        PQ_slopes = self.get_ECG_features(p_peaks, q_peaks)[1]
-        PQ_amplitudes = self.Amplitudes(np.array(features['ECG_P_Peaks']), np.array(features['ECG_Q_Peaks']))
+        PQ_distances = self.get_ECG_features(signal, p_peaks, q_peaks)[0]
+        PQ_slopes = self.get_ECG_features(signal, p_peaks, q_peaks)[1]
+        p_edited_peaks, q_edited_peaks = self.remove_nulls(features['ECG_P_Peaks'], features['ECG_Q_Peaks'])
+        PQ_amplitudes = self.Amplitudes(signal, p_edited_peaks, q_edited_peaks)
 
         # Features between QS
-        QS_distances = self.get_ECG_features(q_peaks, s_peaks)[0]
-        QS_slopes = self.get_ECG_features(q_peaks, s_peaks)[1]
-        QS_amplitudes = self.Amplitudes(np.array(features['ECG_Q_Peaks']), np.array(features['ECG_S_Peaks']))
+        QS_distances = self.get_ECG_features(signal, q_peaks, s_peaks)[0]
+        QS_slopes = self.get_ECG_features(signal, q_peaks, s_peaks)[1]
+        q_edited_peaks, s_edited_peaks = self.remove_nulls(features['ECG_Q_Peaks'], features['ECG_S_Peaks'])
+        QS_amplitudes = self.Amplitudes(signal, q_edited_peaks, s_edited_peaks)
 
         # Features between RT
-        RT_distances = self.get_ECG_features(tr_peaks, t_peaks)[0]
-        RT_slopes = self.get_ECG_features(tr_peaks, t_peaks)[1]
-        RT_amplitudes = self.Amplitudes(tr_peaks.values.flatten(), t_peaks.values.flatten())
+        RT_distances = self.get_ECG_features(signal, tr_peaks, t_peaks)[0]
+        RT_slopes = self.get_ECG_features(signal, tr_peaks, t_peaks)[1]
+        RT_amplitudes = self.Amplitudes(signal, tr_peaks, t_peaks)
 
         # Features between ST
-        ST_distances = self.get_ECG_features(s_peaks, t_peaks)[0]
-        ST_slopes = self.get_ECG_features(s_peaks, t_peaks)[1]
-        ST_amplitudes = self.Amplitudes(np.array(features['ECG_S_Peaks']), np.array(features['ECG_T_Peaks']))
+        ST_distances = self.get_ECG_features(signal, s_peaks, t_peaks)[0]
+        ST_slopes = self.get_ECG_features(signal, s_peaks, t_peaks)[1]
+        s_edited_peaks, t_edited_peaks = self.remove_nulls(features['ECG_S_Peaks'], features['ECG_T_Peaks'])
+        ST_amplitudes = self.Amplitudes(signal, s_edited_peaks, t_edited_peaks)
     
         # the other amplitude features 
-        PS_amplitudes = self.Amplitudes(np.array(features['ECG_P_Peaks']), np.array(features['ECG_S_Peaks']))
-        PT_amplitudes = self.Amplitudes(np.array(features['ECG_T_Peaks']), np.array(features['ECG_P_Peaks']))
-        TQ_amplitudes = self.Amplitudes(np.array(features['ECG_T_Peaks']), np.array(features['ECG_Q_Peaks']))
-        RQ_amplitudes = self.Amplitudes(q_peaks.values.flatten(), qr_peaks.values.flatten())
-        RS_amplitudes = self.Amplitudes(sr_peaks.values.flatten(), s_peaks.values.flatten())
+        s_edited_peaks, p_edited_peaks = self.remove_nulls(features['ECG_S_Peaks'], features['ECG_P_Peaks'])
+        PS_amplitudes = self.Amplitudes(signal, s_edited_peaks, p_edited_peaks)
+        
+        t_edited_peaks, p_edited_peaks = self.remove_nulls(features['ECG_T_Peaks'], features['ECG_P_Peaks'])
+        PT_amplitudes = self.Amplitudes(signal, t_edited_peaks, p_edited_peaks)
+        
+        t_edited_peaks, q_edited_peaks = self.remove_nulls(features['ECG_T_Peaks'], features['ECG_Q_Peaks'])
+        TQ_amplitudes = self.Amplitudes(signal, t_edited_peaks, q_edited_peaks)
+        
+        RQ_amplitudes = self.Amplitudes(signal, q_peaks.values.flatten(), qr_peaks.values.flatten())
+        RS_amplitudes = self.Amplitudes(signal, sr_peaks.values.flatten(), s_peaks.values.flatten())
+    
     
         # intervals features
         QR_interval = self.intervals(q_peaks.values.flatten(), qr_peaks.values.flatten())
@@ -349,7 +352,7 @@ class ECG:
         Extracted_Features_DF['QT Interval'] = QT_interval[:minimum]
         Extracted_Features_DF['RT Interval'] = RT_interval[:minimum]
         Extracted_Features_DF['PT Interval'] = PT_interval[:minimum]
-       
+        
         return Extracted_Features_DF
     
     
@@ -421,7 +424,7 @@ class sql_ecg():
     def insert_model(self, model):
         model_name = str(self.person_ID) + self.person_name + self.phone_number+'.h5'
 
-        db = sqlite3.connect('Heartizm.db')
+        db = sqlite3.connect('Heartizm 2.db')
         cursor = db.cursor()
 
         cursor.execute('UPDATE Person SET ML_model="'+ model_name +'" WHERE ID="'+str(self.person_ID)+'"')
@@ -451,7 +454,7 @@ class sql_ecg():
         return a {dataframe of all features}.
     '''
     def fetch(self, cols, table):
-        connection = sqlite3.connect('Heartizm.db')
+        connection = sqlite3.connect('Heartizm 2.db')
         cursor = connection.cursor()
         
         command = self.select_command(cols, table)        
@@ -484,7 +487,7 @@ class sql_ecg():
         elif table == 'Identification_ECG_Features':
             df = pd.DataFrame(columns= cols + ['Person'], data=fetched_data)
         
-        elif table == 'Authentication_ECG_Features' or 'Fake_Person':
+        elif table == 'Authentication_ECG_Features' or 'Fake_Person' or 'Fitbit':
             df = pd.DataFrame(columns= cols + ['label'], data=fetched_data)
         
         return df
@@ -496,7 +499,7 @@ class sql_ecg():
         otherwise it takes the dataframe as it to insert it the database.
     '''
     def insert(self, table, data=[]):
-        connection = sqlite3.connect('Heartizm.db')
+        connection = sqlite3.connect('Heartizm 2.db')
         cursor = connection.cursor()
         
         if table == 'Person':
@@ -522,7 +525,7 @@ class sql_ecg():
         4- Fake_Person table:                    this table will have an initial values for the main ECG features with label equals 0.
     '''
     def create(self):
-        connection = sqlite3.connect('Heartizm.db')
+        connection = sqlite3.connect('Heartizm 2.db')
         cursor = connection.cursor()
 
         cursor.execute('''
@@ -633,7 +636,7 @@ class sql_ecg():
         connection.commit()
         
         cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS Fake_Person(
+                    CREATE TABLE IF NOT EXISTS Fitbit(
                         PR_Distances NUMERIC,
                         PR_Slope NUMERIC,
                         PR_Amplitude NUMERIC,
@@ -693,44 +696,18 @@ ecg_freq = None
 # create a database if it's not exists.
 creation = sql_ecg()
 creation.create()
-other_users_features = creation.fetch('*', 'Fake_Person')
+other_users_features = creation.fetch('*', 'Fitbit')
 
 person = sql_ecg()
 login_data = []
 
-model = ExtraTreesClassifier(n_estimators=200, criterion='entropy', verbose=2)
+model = ExtraTreesClassifier(n_estimators=100, criterion='entropy', verbose=2)
 
 app = Flask(__name__)
 api = Api(app)
 
 
 
-
-'''
-# class ECG_API(Resource):
-#     def post(self, file_name):
-#         global extracted_features
-#         original_ecg_signal = pd.read_csv(file_path+file_name)
-        
-#         ecg_heart = ECG(original_ecg_signal)
-        
-#         extracted_features = ecg_heart.feature_exctraction()
-#         return ''
-
-#     def get(self, file_name):
-        
-#         ExtraTree_model = joblib.load(model_path + 'Extra tree banha 2.h5')
-#         extracted_features.dropna(inplace=True)
-        
-#         preds = ExtraTree_model.predict(extracted_features)
-#         print(preds)
-#         predictions = pd.DataFrame({'Results': preds})
-#         return {'Results': predictions.value_counts().index[0][0]}
-
-
-# api.add_resource(ECG_API, '/<string:file_name>')
-
-'''
 
 
 '''
@@ -812,6 +789,16 @@ def convert_data_login(data):
     final_signal = np.array(new_signal).astype('float')
     
     return final_signal
+
+
+def fitbit_filter_data(data):
+    edited_signal = []
+    new_signal = data.split(',')[1:-1]
+    for i in new_signal:
+        edited_signal.append(float(i.strip()))
+
+    return edited_signal
+
 
 
 @app.errorhandler(400)
@@ -993,13 +980,14 @@ def get():
     this API function task is to take a person's Name and Phone Number, 
     then get all data about that person from the database.
 '''
-@app.route('/authentication/login', methods=['POST'])
+@app.route('/auth/login', methods=['POST'])
 def authentication_login():
     global predictions
+    # global ecg_freq
     
     json_data = json.loads(request.data.decode('utf-8'))
     
-    connection = sqlite3.connect('Heartizm.db')
+    connection = sqlite3.connect('Heartizm 2.db')
     cursor = connection.cursor()
 
     cursor.execute('SELECT * FROM Person WHERE Name="'+ json_data['UserName'] +'" AND phone_number="'+ json_data['PhoneNumber'] +'"')
@@ -1016,8 +1004,12 @@ def authentication_login():
         else:
             ExtraTree_model = joblib.load(login_data[0][-1])
             
-            ecg_data = convert_data_login(json_data['csv'])
-            ecg_df = pd.DataFrame(ecg_data, columns=['data'])
+            # if ecg_freq == 500:
+            #     ecg_data = convert_data_login(json_data['csv'])
+            # elif ecg_freq == 250:
+            # ecg_data = fitbit_filter_data(json_data['csv'])
+            
+            ecg_df = pd.DataFrame(json_data['csv'], columns=['data'])
 
             ecg_heart = ECG(ecg_df)
             extracted_features = ecg_heart.feature_exctraction()
@@ -1028,11 +1020,15 @@ def authentication_login():
 
             predictions = pd.DataFrame(columns=['Results'])
             predictions['Results'] = preds
+            
+            print(predictions)
+            print(predictions.value_counts())
             if predictions.value_counts().index[0][0] == 0:
+                print('Not Authenticate')
                 return jsonify({'UserName':json_data['UserName'], 'PhoneNumber':json_data['PhoneNumber'], 'Result':'Not Authenticate'})
-            else:
+            elif predictions.value_counts().index[0][0] == 1:
+                print('Authenticate')
                 return jsonify({'UserName':json_data['UserName'], 'PhoneNumber':json_data['PhoneNumber'], 'Result':'Authenticate'})
-
     else:
         return jsonify({'UserName':json_data['UserName'], 'PhoneNumber':json_data['PhoneNumber'], 'Result':'Not Exist...'})
        
@@ -1042,27 +1038,33 @@ def authentication_login():
     this API function task is to take a person's Name, Email and Phone Number,
     and insert his/her data in Person table in the database.
 '''
-@app.route('/authentication/new_user', methods=['POST', 'GET'])
+@app.route('/auth/new_user', methods=['POST', 'GET'])
 def authentication_new_user():
     global other_users_features
     global person
 
     ID = secrets.token_urlsafe(32)
+    print(request.data.decode('utf-8'))
     json_data = json.loads(request.data.decode('utf-8'))
+    print(json_data)
+    
+    
     
     person = sql_ecg(ID, json_data['UserName'], json_data['Email'], json_data['PhoneNumber'])
 
-    connection = sqlite3.Connection('Heartizm.db')
+    connection = sqlite3.Connection('Heartizm 2.db')
     cursor = connection.cursor()
 
     cursor.execute('SELECT * FROM Person')
     records = cursor.fetchall()
     
+    print('---------->>>>>>>>>>>>>>>>      records : ', records)
+    
     records_list = pd.DataFrame(records).values
     if person.person_name in records_list:
-        return jsonify({'UserName':'Null', 'Email':'Null', 'PhoneNumber':'Null'})
+        return jsonify({'UserName':'Exists... (Null)', 'Email':'Exists... (Null)', 'PhoneNumber':'Exists... (Null)'})
     else:
-        other_users_features = person.fetch('*', 'Fake_Person')
+        other_users_features = person.fetch('*', 'Fitbit')
         person.insert('Person')
         
         return jsonify({'UserName':json_data['UserName'], 'Email':json_data['Email'], 'PhoneNumber':json_data['PhoneNumber']})
@@ -1073,21 +1075,30 @@ def authentication_new_user():
     this API function task is to take the ECG data file and extract the main 30 features, 
     then store them with label 1 for training in authentication task.  
 '''
-@app.route('/authentication/store', methods=['POST', 'GET'])
-def authentication_store():
+@app.route('/auth/store', methods=['POST', 'GET'])
+def auth_store():
     global extracted_features
     global other_users_features
     global person
     
-    
     json_data = json.loads(request.data.decode('utf-8'))
+    print(json_data)
+    
+    df = pd.DataFrame(json_data['csv'])
+    # df.to_csv('fitbit data test.csv')
+    
     if len(json_data['csv'])<1:
         print('empty')
         return jsonify({'Result':'you forgot to upload the file'})
     else:
-    
-        ecg_data = convert_data_new(json_data['csv'][0])
-        ecg_df = pd.DataFrame(ecg_data, columns=['data'])
+        # signal_data = fitbit_filter_data(json_data['ecg'])
+        # if ecg_freq==500:
+        #     ecg_data = convert_data_new(json_data['csv'][0])
+        # elif ecg_freq==250:
+        
+        # ecg_data = fitbit_filter_data(json_data['csv'])
+        # print()
+        ecg_df = pd.DataFrame(json_data['csv'], columns=['data'])
         
         ecg_heart = ECG(ecg_df)
         extracted_features = ecg_heart.authentication_labled_feature_exctraction()
@@ -1098,50 +1109,42 @@ def authentication_store():
         other_users_features = pd.concat([other_users_features, extracted_features])
         print(other_users_features)
         
-        return jsonify({'Result':'success'})
+        print(person.person_ID, '    ', person.person_name)
+        df = other_users_features.dropna()
+        print(other_users_features)
+        
+        X = df.iloc[:, :-1]
+        y = df.iloc[:, -1].astype(int)
+        
+        # ros = RandomOverSampler(random_state=0)
+        # X_resampled, y_resampled = ros.fit_resample(X, y)
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+
+        ExtraTree = ExtraTreesClassifier(n_estimators=100, criterion='entropy', verbose=2)
+        ExtraTree.fit(X_train, y_train)
+
+        ExtraTree_preds = ExtraTree.predict(X_test)
+        
+        person.insert_model(ExtraTree)
+        print('Saved ...')
+        
+        print(f'- Accuracy Score: {accuracy_score(ExtraTree_preds, y_test.values)}'
+                        +f'\n- F1 Score: {f1_score(ExtraTree_preds, y_test.values, average="weighted")}'
+                        +f'\n- Recall Score: {recall_score(ExtraTree_preds, y_test.values, average="weighted")}'
+                        +f'\n- Precision Score: {precision_score(ExtraTree_preds, y_test.values, average="weighted")}')
+        
+        return jsonify({'Performance': f'- Accuracy Score: {accuracy_score(ExtraTree_preds, y_test.values)}'
+                        +f'\n- F1 Score: {f1_score(ExtraTree_preds, y_test.values, average="weighted")}'
+                        +f'\n- Recall Score: {recall_score(ExtraTree_preds, y_test.values, average="weighted")}'
+                        +f'\n- Precision Score: {precision_score(ExtraTree_preds, y_test.values, average="weighted")}'})
 
 
 
-'''
-    this API function task is to get the {ecg signal} and return the {main 30 features}.
-'''
-@app.route('/authentication/json_ecg_features', methods=['POST', 'GET'])
-def authentication_store_json_data():
-    global extracted_features
-    
-    json_data = json.loads(request.data.decode('utf-8'))
-    ecg_df = convert_data_login(json_data['csv'])
-    ecg_heart = ECG(ecg_df)
-    extracted_features = ecg_heart.authentication_labled_feature_exctraction()
-    
-    ecg_dict_list = convert_dataframe_json(extracted_features)
-    
-    return jsonify(ecg_dict_list)
 
 
-
-'''
-    this API function task is to determine the type of used smartwatch.
-    
-    if {samsung galaxy watch 4} then the frequencey that passed will be {500 hz}.
-    if {fitbit sence 2} then the frequencey that passed will be {250 hz}.
-    
-    return the {frequencey}
-'''
-@app.route('/authentication/ecg_rate', methods=['POST', 'GET'])
-def authentication_ecg_rate():
-    global ecg_freq
-    
-    json_data = json.loads(request.data.decode('utf-8'))
-    
-    watch_type = json_data['type']
-    if watch_type == 'samsung':
-        ecg_freq = 500
-    elif watch_type=='fitbit':
-        ecg_freq = 250
-    
-    return jsonify(ecg_freq)
-
+###############################################################################################
+###############################################################################################
 
 
 '''
@@ -1149,7 +1152,7 @@ def authentication_ecg_rate():
     save the model in the database in the same row of the authenticated person.
     and return the {ML model performance}.
 '''
-@app.route('/authentication/train', methods=['GET'])
+@app.route('/auth/train', methods=['GET'])
 def authentication_train():
     global other_users_features
     global person
@@ -1175,25 +1178,70 @@ def authentication_train():
                     +f'\n- F1 Score: {f1_score(ExtraTree_preds, y_test.values, average="weighted")}'
                     +f'\n- Recall Score: {recall_score(ExtraTree_preds, y_test.values, average="weighted")}'
                     +f'\n- Precision Score: {precision_score(ExtraTree_preds, y_test.values, average="weighted")}'})
+    
 
-
-@app.route('/authentication/fitbit_data', methods=['POST'])
-def authentication_data():
+'''
+    this API function task is to get the {ecg signal} and return the {main 30 features}.
+'''
+@app.route('/auth/json_ecg_features', methods=['POST', 'GET'])
+def authentication_store_json_data():
+    global extracted_features
+    # global ecg_freq
     
     json_data = json.loads(request.data.decode('utf-8'))
-    data = json_data['ecg']
     
-    connection = sqlite3.Connection('Heartizm.db')
-    cursor = connection.cursor()
-    cursor.executemany('INSERT INTO Fitbit_ECG VALUES (?)', data)
+    # if ecg_freq==500:
+    #     ecg_df = convert_data_login(json_data['csv'])
+    # elif ecg_freq==250:
+    ecg_df = fitbit_filter_data(json_data['csv'])
+        
+    # ecg_df = convert_data_login(json_data['csv'])
+    ecg_heart = ECG(ecg_df)
+    extracted_features = ecg_heart.authentication_labled_feature_exctraction()
     
-    connection.commit()
-    connection.close()
+    ecg_dict_list = convert_dataframe_json(extracted_features)
     
-    df = pd.DataFrame([data])
-    df.to_csv('fitbit data.csv')
+    return jsonify(ecg_dict_list)
+
+
+
+'''
+    this API function task is to determine the type of used smartwatch.
     
-    return ' '
+    if {samsung galaxy watch 4} then the frequencey that passed will be {500 hz}.
+    if {fitbit sence 2} then the frequencey that passed will be {250 hz}.
+    
+    return the {frequencey}
+'''
+@app.route('/auth/ecg_rate', methods=['POST', 'GET'])
+def authentication_ecg_rate():
+    global ecg_freq
+    
+    json_data = json.loads(request.data.decode('utf-8'))
+    
+    watch_type = json_data['type']
+    if watch_type == 'samsung':
+        ecg_freq = 500
+    elif watch_type=='fitbit':
+        ecg_freq = 250
+    
+    return jsonify(ecg_freq)
+
+
+
+@app.route('/fitbit_data', methods=['POST', 'GET'])
+def authentication_data():
+
+    json_data = json.loads(request.data.decode('utf-8'))
+    print(json_data['ecg'])
+    # signal_data = fitbit_filter_data(json_data['ecg'])
+    
+    df = pd.DataFrame(json_data['ecg'])
+    df.to_csv('fitbit data1.csv')
+    
+    return jsonify('success')
+
+
 
 
 
