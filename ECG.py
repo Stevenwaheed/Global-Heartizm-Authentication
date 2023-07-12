@@ -3,7 +3,7 @@ from flask import Flask, jsonify, request, make_response
 from flask_restful import Api
 
 # DataFrame packages
-import matplotlib.pyplot
+# import matplotlib.pyplot
 import numpy as np
 import pandas as pd
 
@@ -28,8 +28,8 @@ import sqlite3
 import joblib
 import json
 import secrets
-import matplotlib.pyplot as plt
- 
+# import matplotlib.pyplot as plt
+ from waitress import serve
 
 '''
     This class contains all necessary functions that needed to deal with ECG signals such as:
@@ -1316,4 +1316,4 @@ def authentication_data():
 #     return jsonify({'Result': login_data[0][0]})
 
 
-app.run(host='0.0.0.0', port=1000)
+serve(app, host='0.0.0.0', port=5000)
