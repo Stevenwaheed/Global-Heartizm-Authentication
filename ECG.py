@@ -29,7 +29,7 @@ import joblib
 import json
 import secrets
 # import matplotlib.pyplot as plt
- from waitress import serve
+from waitress import serve
 
 '''
     This class contains all necessary functions that needed to deal with ECG signals such as:
@@ -1314,6 +1314,5 @@ def authentication_data():
 #     connection.close()
     
 #     return jsonify({'Result': login_data[0][0]})
-
 
 serve(app, host='0.0.0.0', port=5000)
